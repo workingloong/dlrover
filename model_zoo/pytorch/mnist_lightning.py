@@ -21,6 +21,7 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
+from dlrover.trainer.torch.elastic import ElasticTrainer
 from dlrover.trainer.torch.elastic_sampler import ElasticDistributedSampler
 
 
@@ -87,6 +88,7 @@ class LightningMNISTClassifier(pl.LightningModule):
 
 class MNISTDataModule(pl.LightningDataModule):
     def __init__(self, train_dir, test_dir, batch_size, shuffle):
+        super().__init__()
         self.train_dir = train_dir
         self.test_dir = test_dir
         self.batch_size = batch_size
@@ -119,6 +121,7 @@ class MNISTDataModule(pl.LightningDataModule):
             self.mnist_train,
             batch_size=self.batch_size,
             sampler=self.train_sampler,
+            num_workers=2,
         )
 
     def val_dataloader(self):
@@ -137,6 +140,7 @@ class MNISTDataModule(pl.LightningDataModule):
 
 
 def train(args):
+    ElasticTrainer.setup()  # Setup master_addr
     data_module = MNISTDataModule(
         args.training_data, args.validation_data, args.batch_size, args.shuffle
     )
@@ -158,6 +162,8 @@ def train(args):
         max_epochs=2,
         default_root_dir="./data/",
         callbacks=callbacks,
+        strategy="ddp",
+        use_distributed_sampler=False,
     )
 
     trainer.fit(model, data_module)
