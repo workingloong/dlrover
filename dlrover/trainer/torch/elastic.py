@@ -50,13 +50,11 @@ def set_master_addr(timeout=120):
         return
     master_client = GlobalMasterClient.MASTER_CLIENT
     rank = os.getenv("RANK", None)
-    rdzv_endpoint = os.getenv("RDZV_ENDPOINT", "")
     if rank is not None:
         if rank == "0":
-            host_name = socket.gethostname()
-            local_ip = socket.gethostbyname(host_name)
-            master_client.kv_store_set(_MASTER_ENDPOINT_KEY, local_ip.encode())
-            logger.info("Broadcast master endpoint %s", local_ip)
+            pod_ip = os.getenv("MY_POD_IP", "")
+            master_client.kv_store_set(_MASTER_ENDPOINT_KEY, pod_ip.encode())
+            logger.info("Broadcast master endpoint %s", pod_ip)
 
         start_time = time.time()
         while True:
@@ -70,12 +68,12 @@ def set_master_addr(timeout=120):
                     timeout,
                 )
                 break
-            logger.info("Wait rank 0 to broadcast the master endpoint.")
+            logger.info(
+                f"Rank {rank} waits rank 0 to broadcast the master endpoint."
+            )
             time.sleep(3)
     if endpoint:
         os.environ[_MASTER_ADDR_KEY] = endpoint
-    elif rdzv_endpoint:
-        os.environ[_MASTER_ADDR_KEY] = rdzv_endpoint
     group_rank = os.getenv("GROUP_RANK", None)
     local_rank = os.getenv("LOCAL_RANK", None)
     if local_rank == "0" and group_rank is not None:

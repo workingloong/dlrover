@@ -358,8 +358,8 @@ class PodScaler(Scaler):
             V1EnvVar(name=NodeEnv.DLROVER_MASTER_ADDR, value=master_service)
         )
         if self._distribution_strategy == DistributionStrategy.ALLREDUCE:
-            torch_master_ip = self.get_first_worker_host()
-            if torch_master_ip:
+            if node.id > 0:
+                torch_master_ip = self.get_first_worker_host()
                 env.append(
                     V1EnvVar(name=NodeEnv.RDZV_ENDPOINT, value=torch_master_ip)
                 )
