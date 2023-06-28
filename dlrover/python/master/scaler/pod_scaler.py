@@ -27,6 +27,7 @@ from dlrover.python.common.constants import (
     NodeStatus,
     NodeType,
 )
+from dlrover.python.common.global_context import Context
 from dlrover.python.common.log import default_logger as logger
 from dlrover.python.common.node import Node, NodeResource
 from dlrover.python.master.scaler.base_scaler import ScalePlan, Scaler
@@ -35,6 +36,13 @@ from dlrover.python.scheduler.kubernetes import (
     get_pod_name,
     k8sClient,
 )
+
+_dlrover_context = Context.singleton_instance()
+
+
+class FakeKubeResponse:
+    def __init__(self, obj):
+        self.data = json.dumps(obj)
 
 
 class FakeKubeResponse:
@@ -351,8 +359,8 @@ class PodScaler(Scaler):
         env.append(
             V1EnvVar(name=NodeEnv.WORKER_RANK, value=str(node.rank_index))
         )
-        master_service = "elasticjob-{}-dlrover-master:50001".format(
-            self._job_name
+        master_service = "elasticjob-{}-dlrover-master:{}".format(
+            self._job_name, _dlrover_context.master_port
         )
         env.append(
             V1EnvVar(name=NodeEnv.DLROVER_MASTER_ADDR, value=master_service)
@@ -412,6 +420,13 @@ class PodScaler(Scaler):
             node.rank_index
         )
         self._patch_tf_config_into_env(pod, node, pod_stats, ps_addrs)
+        if (
+            _dlrover_context.auto_ps_enabled
+            or _dlrover_context.auto_worker_enabled
+        ):
+            pod.spec.containers[0].env.append(
+                V1EnvVar(name=NodeEnv.AUTO_MONITOR_WORKLOAD, value="true")
+            )
         return pod
 
     def get_first_worker_host(self):

@@ -26,6 +26,7 @@ from dlrover.python.common.constants import (
     NodeStatus,
     NodeType,
 )
+from dlrover.python.common.global_context import Context
 from dlrover.python.common.log import default_logger as logger
 from dlrover.python.common.node import Node, NodeGroupResource
 from dlrover.python.master.monitor.speed_monitor import SpeedMonitor
@@ -67,6 +68,8 @@ from dlrover.python.master.watcher.factory import (
 )
 from dlrover.python.scheduler.factory import new_elastic_job
 from dlrover.python.scheduler.job import ElasticJob, JobArgs
+
+_dlrover_context = Context.singleton_instance()
 
 _MAX_POD_RELAUNCH_COUNT = 5
 
@@ -446,7 +449,10 @@ class JobManager(object):
             and node.relaunchable
         )
         if should_relaunch:
-            if node.exit_reason == NodeExitReason.FATAL_ERROR:
+            if (
+                node.exit_reason == NodeExitReason.FATAL_ERROR
+                and not _dlrover_context.relaunch_error
+            ):
                 should_relaunch = False
             elif node.exit_reason == NodeExitReason.OOM:
                 mem = node.config_resource.memory
@@ -578,18 +584,15 @@ class JobManager(object):
         node.update_resource_usage(cpu, memory)
 
     def update_node_service_addr(self, node_type, node_id, service_addr):
-        logger.info("job nodes are {}".format(self._job_nodes))
-        logger.info(node_id)
         node = self._job_nodes[node_type][node_id]
-        logger.info(
-            "update_node_service_addr id of node is {}".format(id(node))
-        )
         node.update_service_address(service_addr)
         node.status = NodeStatus.RUNNING
         node.is_released = False
-        logger.info("node status {}".format(node.status))
         self._job_nodes[node_type][node_id] = node
-        logger.info("job nodes are {}".format(self._job_nodes))
+
+    def log_rank_zero_node(self, node_type, node_id, node_rank):
+        node = self._job_nodes[node_type][node_id]
+        logger.info("Rank %s: %s", node_rank, node.name)
 
     def get_cur_cluster_ps(self):
         """Get PS nodes in the current training cluster."""

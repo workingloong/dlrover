@@ -248,7 +248,8 @@ class MasterClient(object):
         request.id = task_id
         request.type = task_type
         request.addr = node_addr
-        res = self._stub.update_node_addr(request)
+        request.rank = -1
+        res = self._stub.update_node_status(request)
         return res
 
     @retry_grpc_request
@@ -373,6 +374,22 @@ class MasterClient(object):
         request.key = key
         response = self._stub.kv_store_get(request)
         return response.value
+
+    @retry_grpc_request
+    def report_node_status(self, rank):
+        if rank is None:
+            return
+        request = elastic_training_pb2.NodeMeta()
+        request.id = self._node_id
+        request.type = self._node_type
+        request.rank = int(rank)
+        self._stub.update_node_status(request)
+
+    def report_failures(self, error_data):
+        request = elastic_training_pb2.NodeFailure()
+        request.node_id = self._node_id
+        request.error_data = error_data
+        self._stub.report_failure(request)
 
 
 class LocalDataset(object):
@@ -551,16 +568,19 @@ class LocalMasterClient(object):
     def kv_store_get(self, key):
         return self._kv_store.get(key, "")
 
+    def report_node_status(self, rank):
+        logger.info(f"Report rank {rank}")
+        return
+
 
 def build_master_client(master_addr=None):
-    logger.info("Build master client")
     if master_addr is None:
         master_addr = os.getenv(NodeEnv.DLROVER_MASTER_ADDR, "")
     worker_id = int(os.getenv(NodeEnv.WORKER_ID, 0))
     worker_type = os.getenv(NodeEnv.WORKER_TYPE, "worker")
 
     if master_addr:
-        logger.info("getting global master client")
+        logger.info("Build master client to connect with the DLRover master.")
         master_client = MasterClient(master_addr, worker_id, worker_type)
     else:
         master_client = LocalMasterClient(worker_id)
