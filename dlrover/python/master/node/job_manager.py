@@ -375,7 +375,7 @@ class JobManager(object):
                 name=event.node.name,
                 start_time=event.node.start_time,
                 create_time=event.node.create_time,
-                node_name=event.node.node_name,
+                host_name=event.node.host_name,
             )
 
         # For the given node id, check whether it meets
@@ -665,8 +665,9 @@ class JobManager(object):
             return False
 
     def handle_training_failure(
-        self, node_type, node_id, restart_count, error_data
+        self, node_type, node_id, restart_count=-1, error_data=""
     ):
+        """Process the training failure reported by the node."""
         node = self._job_nodes[node_type][node_id]
         if restart_count >= 0:
             self._error_monitor.handle_process_error(

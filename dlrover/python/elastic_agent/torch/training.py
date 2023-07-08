@@ -79,11 +79,12 @@ class MasterRendezvousHandler(RendezvousHandler):
         self._client = GlobalMasterClient.MASTER_CLIENT
         self._store = MasterKVStore(self._name, timedelta(seconds=60))
         lastcall_timeout = int(rdzv_params.get("lastcall_timeout", 60))
-        self._client.report_rdzv_params(
-            rdzv_params.min_nodes,
-            rdzv_params.max_nodes,
-            lastcall_timeout,
-        )
+        if self._rank_id == 0:
+            self._client.report_rdzv_params(
+                rdzv_params.min_nodes,
+                rdzv_params.max_nodes,
+                lastcall_timeout,
+            )
 
     def get_backend(self) -> str:
         return "dlrover-master"
@@ -317,7 +318,7 @@ class ElasticTrainingAgent(LocalElasticAgent):
         return workers
 
     def _initialize_workers(self, worker_group):
-        if self._config.network_check:
+        if self._config.network_check and self._restart_count == 0:
             run_network_check(self._config, self._entrypoint)
         super()._initialize_workers(worker_group)
 
@@ -339,7 +340,7 @@ class ElasticTrainingAgent(LocalElasticAgent):
         while True:
             assert self._worker_group.state != WorkerState.INIT
             time.sleep(monitor_interval)
-            run_result = self._monitor_workers(self._worker_group)
+            run_result: RunResult = self._monitor_workers(self._worker_group)
             state = run_result.state
             self._worker_group.state = state
 
@@ -358,7 +359,8 @@ class ElasticTrainingAgent(LocalElasticAgent):
                 return run_result
             elif state in {WorkerState.UNHEALTHY, WorkerState.FAILED}:
                 self._report_failure_to_master(run_result.failures)
-                if self._remaining_failovers > 0:
+                has_fatal_error = self._has_fatal_error(run_result)
+                if not has_fatal_error and self._remaining_failovers > 0:
                     logger.info(
                         f"[{role}] Worker group {state.name}. "
                         f"{self._remaining_failovers}/{spec.max_restarts}"
@@ -367,6 +369,7 @@ class ElasticTrainingAgent(LocalElasticAgent):
                     self._remaining_failovers -= 1
                     self._restart_workers(self._worker_group)
                 else:
+                    logger.info("Cannot restart workers with fatal error.")
                     self._stop_workers(self._worker_group)
                     self._worker_group.state = WorkerState.FAILED
                     return run_result
@@ -376,6 +379,14 @@ class ElasticTrainingAgent(LocalElasticAgent):
                     self._restart_workers(self._worker_group)
             else:
                 raise Exception(f"[{role}] Worker group in {state.name} state")
+
+    def _has_fatal_error(self, run_result: RunResult):
+        """The error with exitcode 1 is the Python exception and we cannot
+        recover it by restarting workers."""
+        for pfailure in run_result.failures.values():
+            if pfailure.exitcode == 1:
+                return True
+        return False
 
     def _report_failure_to_master(self, failures: Dict[int, ProcessFailure]):
         errors = {}
@@ -593,9 +604,9 @@ class NcclCheckElasticAgent(ElasticTrainingAgent):
             raise RuntimeError("The node network is breakdown.")
         return False
 
-    def _run_network_check(self, monitor_interval):
+    def _run_network_check(self, monitor_interval, timeout=300):
         self._initialize_workers(self._worker_group)
-
+        start = time.time()
         while True:
             assert self._worker_group.state != WorkerState.INIT
             time.sleep(monitor_interval)
@@ -603,6 +614,9 @@ class NcclCheckElasticAgent(ElasticTrainingAgent):
             state = run_result.state
             self._worker_group.state = state
             if state == WorkerState.HEALTHY:
+                if time.time() - start > timeout:
+                    logger.error(f"Timeout {timeout} to check network.")
+                    return False
                 continue
             return state == WorkerState.SUCCEEDED
 
@@ -694,7 +708,7 @@ def run_network_check(config, entrypoint):
             config=config, entrypoint=entrypoint, args=cmd_args
         )
         if success:
-            logger.error("Network check pass.")
+            logger.info("Network check pass.")
             return success
         else:
             logger.error(
