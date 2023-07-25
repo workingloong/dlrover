@@ -14,7 +14,6 @@
 from abc import ABCMeta, abstractmethod
 from typing import Dict
 
-from dlrover.python.common.constants import NodeErrorMessage
 from dlrover.python.common.log import default_logger as logger
 from dlrover.python.common.node import Node
 
@@ -45,10 +44,12 @@ class ErrorLogMonitor(ErrorMonitor):
         if restart_count not in self._restart_errors:
             self._restart_errors[restart_count] = error_data
             logger.error(
-                f"{node.type}-{node.id} on {node.node_name} "
+                f"{node.type}-{node.id} on {node.host_name} "
                 f"restart {restart_count} fails: {error_data}"
             )
 
     def handle_node_error(self, node: Node, error_data: str):
-        if error_data == NodeErrorMessage.NETWORKER_ERROR:
-            logger.error(f"{node.name} on {node.node_name} is breakdown.")
+        logger.error(
+            f"{node.name} on {node.host_name} is breakdown."
+            f"Reason: {error_data}"
+        )

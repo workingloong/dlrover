@@ -12,22 +12,6 @@ Using elastic training of DLRover, users only need to set the
 `ElasticDistributedSampler` into their training `DataLoader`
 and checkpoint the sampler when checkpointing the model.
 
-### Setup the Environment Using ElasticTrainer
-
-Users need to set up the environment through `setup_master_addr`
-because the pod with rank-0 in an elastic training job may
-changes.
-
-The `setup_master_addr` will mark the rank-0 node as PyTorch MASTER
-and the node's IP as `MASTER_ADDR`. Note that, the ranks of all nodes
-are not fixed during elasticity and the rank-0 node is always marked as MASTER.
-
-```python
-from dlrover.trainer.torch.elastic import setup_master_addr
-
-setup_master_addr()
-```
-
 ### Setup ElasticDistributedSampler into the Dataloader.
 
 
@@ -152,13 +136,7 @@ RUN pip install dlrover -U
 COPY ./model_zoo ./model_zoo
 ```
 
-### Run the Training code with torchrun.
-
-If we want to use the DLRover job master as the rendezvous backend,
-we need to execute `python -m dlrover.python.elastic_agent.torch.prepare`
-before `trochrun`. The `RendezvousBackend` of job master can support
-the fault-tolerance of rank-0 which is not supported
-in `C10dRendezvousBackend`.
+### Run the Training code with dlrover-run.
 
 ```yaml
 spec:
@@ -172,14 +150,13 @@ spec:
           containers:
             - name: main
               # yamllint disable-line rule:line-length
-              image: registry.cn-hangzhou.aliyuncs.com/intell-ai/dlrover:torch113-mnist
+              image: registry.cn-hangzhou.aliyuncs.com/intell-ai/dlrover:torch201-mnist
               imagePullPolicy: Always
               command:
                 - /bin/bash
                 - -c
-                - "python -m dlrover.python.elastic_agent.torch.prepare \
-                  && torchrun --nnodes=1:$WORKER_NUM --nproc_per_node=1
-                  --max_restarts=3 --rdzv_backend=dlrover-master \
+                - "dlrover-run --nnodes=1:$WORKER_NUM --nproc_per_node=1
+                  --max_restarts=3 \
                   model_zoo/pytorch/mnist_cnn.py \
                   --training_data /data/mnist_png/training/elastic_ds.txt \
                   --validation_data /data/mnist_png/testing/elastic_ds.txt"

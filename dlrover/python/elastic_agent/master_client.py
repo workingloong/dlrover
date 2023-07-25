@@ -21,7 +21,7 @@ from typing import Dict
 from google.protobuf import empty_pb2
 
 from dlrover.proto import elastic_training_pb2, elastic_training_pb2_grpc
-from dlrover.python.common.constants import NodeEnv
+from dlrover.python.common.constants import NetworkFailureReason, NodeEnv
 from dlrover.python.common.grpc import build_channel
 from dlrover.python.common.log import default_logger as logger
 
@@ -352,17 +352,29 @@ class MasterClient(object):
         return response.group, response.world
 
     @retry_grpc_request
-    def network_check_success(self):
+    def network_check_success(self, timeout=300):
         request = elastic_training_pb2.RendezvousRequest()
-        response = self._stub.network_check_success(request)
+        start = time.time()
+        while True:
+            response = self._stub.network_check_success(request)
+            if (
+                response.reason == NetworkFailureReason.WAITING_NODE
+                and time.time() - start < timeout
+            ):
+                time.sleep(5)
+                continue
+            break
         return response.success
 
     @retry_grpc_request
-    def report_rdzv_params(self, min_nodes, max_nodes, waiting_timeout):
+    def report_rdzv_params(
+        self, min_nodes, max_nodes, waiting_timeout, node_unit
+    ):
         request = elastic_training_pb2.RendezvousParams()
         request.min_nodes = min_nodes
         request.max_nodes = max_nodes
         request.waiting_timeout = waiting_timeout
+        request.node_unit = node_unit
         response = self._stub.report_rdzv_params(request)
         return response.success
 
@@ -555,7 +567,7 @@ class LocalMasterClient(object):
     def report_used_resource(self, memory, cpu):
         return empty_pb2.Empty()
 
-    def num_nodes_waiting(self):
+    def num_nodes_waiting(self, rdzv_name=""):
         return 0
 
     def join_rendezvous(
@@ -573,7 +585,9 @@ class LocalMasterClient(object):
     def report_node_status(self, normal):
         return True
 
-    def report_rdzv_params(self, min_nodes, max_nodes, waiting_timeout):
+    def report_rdzv_params(
+        self, min_nodes, max_nodes, waiting_timeout, node_unit
+    ):
         return True
 
     def kv_store_set(self, key, value):

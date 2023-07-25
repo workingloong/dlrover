@@ -15,6 +15,7 @@ import time
 import unittest
 from unittest import mock
 
+from dlrover.proto import elastic_training_pb2
 from dlrover.python.common.constants import (
     DistributionStrategy,
     JobExitReason,
@@ -48,6 +49,7 @@ from dlrover.python.tests.test_utils import (
     MockK8sPSJobArgs,
     create_task_manager,
     mock_k8s_client,
+    new_dataset_splitter,
 )
 
 _MOCK_JOB_UUID = "11111"
@@ -66,17 +68,17 @@ class NodeStatusFlowTest(unittest.TestCase):
         flow: NodeStateFlow = get_node_state_flow(
             NodeStatus.PENDING, NodeEventType.MODIFIED, NodeStatus.RUNNING
         )
-        self.assertEqual(flow, NODE_STATE_FLOWS[2])
+        self.assertEqual(flow, NODE_STATE_FLOWS[4])
 
         flow = get_node_state_flow(
             NodeStatus.RUNNING, NodeEventType.MODIFIED, NodeStatus.SUCCEEDED
         )
-        self.assertEqual(flow, NODE_STATE_FLOWS[5])
+        self.assertEqual(flow, NODE_STATE_FLOWS[7])
 
         flow = get_node_state_flow(
             NodeStatus.RUNNING, NodeEventType.DELETED, NodeStatus.DELETED
         )
-        self.assertEqual(flow, NODE_STATE_FLOWS[8])
+        self.assertEqual(flow, NODE_STATE_FLOWS[10])
         self.assertTrue(flow.should_relaunch)
 
         flow = get_node_state_flow(
@@ -234,13 +236,30 @@ class JobManagerTest(unittest.TestCase):
         manager._adjust_worker_for_estimator()
         manager._init_nodes()
         manager._init_job_auto_scaler()
-        self.assertEqual(len(manager._job_nodes[NodeType.WORKER]), 1)
+        self.assertEqual(len(manager._job_nodes[NodeType.WORKER]), 3)
         manager.start_auto_scaling()
         self.assertEqual(len(manager._job_nodes[NodeType.WORKER]), 3)
 
     def test_recover_tasks_for_failed_workers(self):
-        dataset_name = "test"
-        task_manager = create_task_manager()
+        ds_name_0 = "test-0"
+        ds_name_1 = "test-1"
+        task_manager = create_task_manager(ds_name_0)
+        splitter = new_dataset_splitter(
+            False,
+            100,
+            1000,
+            1,
+            ds_name_1,
+            "table",
+        )
+        task_manager.new_dataset(
+            batch_size=10,
+            dataset_size=1000,
+            dataset_name=ds_name_1,
+            dataset_splitter=splitter,
+            task_type=elastic_training_pb2.EVALUATION,
+        )
+
         task_callback = TaskRescheduleCallback(task_manager)
         params = MockK8sPSJobArgs()
         params.initilize()
@@ -248,16 +267,19 @@ class JobManagerTest(unittest.TestCase):
         manager._init_nodes()
         manager.add_node_event_callback(task_callback)
 
-        dataset = task_manager.get_dataset(dataset_name)
-        task_manager.get_dataset_task(NodeType.WORKER, 0, dataset_name)
+        dataset_0 = task_manager.get_dataset(ds_name_0)
+        dataset_1 = task_manager.get_dataset(ds_name_1)
+        task_manager.get_dataset_task(NodeType.WORKER, 0, ds_name_0)
+        task_manager.get_dataset_task(NodeType.WORKER, 0, ds_name_1)
         node = Node(
             node_type=NodeType.WORKER,
             node_id=0,
             status=NodeStatus.RUNNING,
             config_resource=NodeResource(1, 4096),
         )
-        manager._process_node_events(NODE_STATE_FLOWS[7], node)
-        self.assertEqual(len(dataset.doing), 0)
+        manager._process_node_events(NODE_STATE_FLOWS[9], node)
+        self.assertEqual(len(dataset_0.doing), 0)
+        self.assertEqual(len(dataset_1.doing), 0)
 
     def test_create_initial_nodes(self):
         params = MockK8sPSJobArgs()
@@ -315,6 +337,7 @@ class JobManagerTest(unittest.TestCase):
         callback = TFPSNodeHandlingCallback(master)
 
         node = Node(NodeType.PS, 0, None)
+        node.config_resource = NodeResource(1, 10240)
         node.exit_reason = NodeExitReason.OOM
         reason = callback.get_job_exit_reason(node)
         self.assertEqual(reason, JobExitReason.PS_OOM_ERROR)

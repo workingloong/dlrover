@@ -179,7 +179,6 @@ class TrainingNodeManager(object):
             new_id = next(self._node_id_iter)
             relaunch_node = node.get_relaunch_node_info(new_id)
             self._nodes[new_id] = relaunch_node
-            self._nodes.pop(node.id)
         logger.info("Relaunch node %s to %s", node.name, new_id)
         plan.launch_nodes.append(
             Node(
@@ -192,7 +191,6 @@ class TrainingNodeManager(object):
                 relaunch_count=relaunch_node.relaunch_count,
             )
         )
-        plan.remove_nodes.append(node)
         return plan
 
     def cut_pending_node_cpu(self):
@@ -218,6 +216,8 @@ class TrainingNodeManager(object):
         return nodes
 
     def all_nodes_exited(self):
+        if len(self._nodes) == 0:
+            return True
         counter = self._get_node_counter()
 
         # At start, there may be no launched worker.

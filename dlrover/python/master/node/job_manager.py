@@ -205,8 +205,12 @@ class JobManager(object):
             self._elastic_job.get_node_service_addr,
             self._elastic_job.get_node_name,
         )
+
+        chief_nodes = self._job_nodes.get(NodeType.CHIEF, {})
+        if not chief_nodes:
+            chief_nodes = self._job_nodes.get(NodeType.MASTER, {})
         self._chief_manager = ChiefManager(
-            self._job_nodes.get(NodeType.CHIEF, {}),
+            chief_nodes,
             self._job_resource,
             self._relaunch_on_worker_failure,
             self._elastic_job.get_node_service_addr,
@@ -375,7 +379,8 @@ class JobManager(object):
                 name=event.node.name,
                 start_time=event.node.start_time,
                 create_time=event.node.create_time,
-                node_name=event.node.node_name,
+                host_name=event.node.host_name,
+                host_ip=event.node.host_ip,
             )
 
         # For the given node id, check whether it meets
@@ -502,7 +507,6 @@ class JobManager(object):
             plan = self._chief_manager.relaunch_node(node)
         else:
             logger.error("Not support node type %s", node.type)
-        logger.info("Relaunch node: {}".format(node.name))
         self._set_ps_addrs_in_plan(plan)
         self._scaler.scale(plan)
 
@@ -556,7 +560,7 @@ class JobManager(object):
         nodes = self._chief_manager.get_running_nodes()
         nodes.extend(self._worker_manager.get_running_nodes())
         nodes.extend(self._evaluator_manager.get_running_nodes())
-        nodes.extend(self._ps_manager.get_training_ps_cluster())
+        nodes.extend(self._ps_manager.get_running_nodes())
         return nodes
 
     def get_running_workers(self):
@@ -651,8 +655,10 @@ class JobManager(object):
             return all(node_hang)
         return False
 
-    def remove_not_participated_workers(self, workers):
-        plan = self._worker_manager.remove_not_participated_workers(workers)
+    def remove_not_joined_rdzv_workers(self, worker_ranks):
+        plan = self._worker_manager.remove_not_joined_rdzv_workers(
+            worker_ranks
+        )
         self._scaler.scale(plan)
 
     def pend_without_workers(self):
@@ -665,8 +671,9 @@ class JobManager(object):
             return False
 
     def handle_training_failure(
-        self, node_type, node_id, restart_count, error_data
+        self, node_type, node_id, restart_count=-1, error_data=""
     ):
+        """Process the training failure reported by the node."""
         node = self._job_nodes[node_type][node_id]
         if restart_count >= 0:
             self._error_monitor.handle_process_error(
@@ -674,6 +681,10 @@ class JobManager(object):
             )
         else:
             self._error_monitor.handle_node_error(node, error_data)
+
+    def update_allreduce_node_unit(self, node_unit):
+        if isinstance(self._job_optimizer, AllreduceJobResourceOptimizer):
+            self._job_optimizer.set_node_unit(node_unit)
 
 
 def create_job_manager(args: JobArgs, speed_monitor) -> JobManager:
